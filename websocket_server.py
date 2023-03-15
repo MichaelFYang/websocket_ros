@@ -168,7 +168,7 @@ class SocketRosNode:
         cloud_pose = cloud_pose.flatten().tolist()
         point_data = {"frame_pose": cloud_pose, "data": pc_np}  # Convert to list of lists
         data_["point_cloud"] = point_data
-        rospy.loginfo("Updated point cloud data")
+        # rospy.loginfo("Updated point cloud data")
 
     def odometry_callback(self, data):
         # Convert Odometry to 4x4 transformation matrix using scipy
@@ -193,7 +193,7 @@ class SocketRosNode:
         transformation_matrix = transformation_matrix.flatten().tolist()
         odom_data = {"frame_pose": transformation_matrix}  # Convert to list of lists
         data_["odom"] = odom_data
-        rospy.loginfo("Updated odometry data")
+        # rospy.loginfo("Updated odometry data")
         
     def convert_mesh_to_numpy(self, msg):
         # return arary of vertices (N2, 3), convert to numpy array of size 64 * 64 with z information
@@ -244,7 +244,7 @@ class SocketRosNode:
         mesh_data = {"frame_pose": mesh_pose, "res": res, "dim_x": dim_x, "dim_y": dim_y, "data": mesh_np}
         # mesh_data = {"frame_pose": mesh_pose, "data": mesh_np}
         data_["mesh"] = mesh_data
-        rospy.loginfo("Updated mesh data")
+        # rospy.loginfo("Updated mesh data")
 
 def start_socket_server():
     eventlet.wsgi.server(eventlet.listen(('', 5030)), app)
@@ -337,10 +337,15 @@ def odom_worker():
 def main():
     # ros_thread = eventlet.spawn(SocketRosNode)
     SocketRosNode()
-    socket.start_background_task(pointcloud_worker)
-    socket.start_background_task(mesh_worker)
-    socket.start_background_task(odom_worker)
-    start_socket_server()
+    while not rospy.is_shutdown():
+        try:
+            socket.start_background_task(pointcloud_worker)
+            socket.start_background_task(mesh_worker)
+            socket.start_background_task(odom_worker)
+            start_socket_server()
+        except:
+            pass
+
 
 if __name__ == '__main__':
     main()
