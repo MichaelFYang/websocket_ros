@@ -141,24 +141,24 @@ def worker1():
     eventlet.wsgi.server(eventlet.listen(('', 5030)), app)
 
 
-def generate_points(num_points, radius=1.0):
-    # Generate uniform angles
-    theta = np.random.uniform(0, 2*np.pi, num_points)
-    phi = np.arccos(np.random.uniform(-1, 1, num_points))
+# def generate_points(num_points, radius=1.0):
+#     # Generate uniform angles
+#     theta = np.random.uniform(0, 2*np.pi, num_points)
+#     phi = np.arccos(np.random.uniform(-1, 1, num_points))
 
-    # Convert spherical coordinates to Cartesian coordinates and scale by radius
-    x = radius * np.sin(phi) * np.cos(theta)
-    y = radius * np.sin(phi) * np.sin(theta)
-    z = radius * np.cos(phi)
+#     # Convert spherical coordinates to Cartesian coordinates and scale by radius
+#     x = radius * np.sin(phi) * np.cos(theta)
+#     y = radius * np.sin(phi) * np.sin(theta)
+#     z = radius * np.cos(phi)
 
-    # Combine x, y, z into a single array and round
-    points = np.stack((x, y, z), axis=-1)
-    points = np.round(points, 3)
+#     # Combine x, y, z into a single array and round
+#     points = np.stack((x, y, z), axis=-1)
+#     points = np.round(points, 3)
     
-    # flatten
-    points = points.flatten()
+#     # flatten
+#     points = points.flatten()
 
-    return points.tolist()
+#     return points.tolist()
 
 @socket.on('target_pose')  # Listening for 'client_message' event
 def handle_client_message(sid, message):
@@ -184,7 +184,7 @@ def worker2(data):
         # data = {"data": generate_points(1000, radius=0.2)}
         if data["data"] is not None:
             print("send msg")
-            socket.emit('point_cloud', data)
+            socket.emit('point_cloud', json.dumps(data))
             data["data"] = None
         socket.sleep(1)
 
