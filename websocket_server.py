@@ -9,7 +9,7 @@ socket = socketio.Server(async_mode='eventlet')
 app = socketio.WSGIApp(socket)
 
 def worker1():
-    eventlet.wsgi.server(eventlet.listen(('', 5000)), app)
+    eventlet.wsgi.server(eventlet.listen(('', 5030)), app)
 
 
 def generate_points(num_points, radius=1.0):
@@ -31,8 +31,24 @@ def generate_points(num_points, radius=1.0):
 
     return points.tolist()
 
-# @socket.on('connect')
+@socket.on('target_pose')  # Listening for 'client_message' event
+def handle_client_message(sid, message):
+    pose = decode_transformation_matrix(message)
+    print(f"Received message from client {sid}")
+    print(pose)
+    
 
+def decode_transformation_matrix(json_string):
+    # Parse the JSON string
+    data = json.loads(json_string)
+
+    # Extract the matrix values
+    matrix_values = data['poseTarget']
+
+    # Reshape the values into a 4x4 matrix
+    transformation_matrix = np.array(matrix_values).reshape(4, 4)
+
+    return transformation_matrix
 
 def worker2():
     

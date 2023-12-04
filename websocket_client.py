@@ -15,6 +15,10 @@ def clock(data):
 @sio.event
 def disconnect():
     print('disconnected from server')
+    
+@sio.on('point_cloud')
+def point_cloud(data):
+    print('point cloud received with ', data)
 
 sio.connect('http://localhost:5030')
 sio.wait()
