@@ -22,26 +22,28 @@ class RosDataCommunicator:
         self.app = socketio.WSGIApp(self.socket)
         
         # set up thread
-        self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self.worker1)
-        self._thread.daemon = True
+        # self._thread = threading.Thread(target=self.worker1)
+        # self._thread.daemon = True
 
     def worker1(self):
         try:
             eventlet.wsgi.server(eventlet.listen(('', self.port)), self.app)
         except Exception as e:
             print(f"Server failed to start: {e}")
-
-    def send_update(self, data):
-        # Convert ROS data to JSON and emit via socket
+            
+    def worker2(self, data):
+        print("worker2")
         self.socket.emit('point_cloud', json.dumps(data))
         print("sent data")
 
+    def send_update(self, data):
+        # Convert ROS data to JSON and emit via socket
+        self.socket.start_background_task(self.worker2, data)
+        print("sent data")
+
     def start(self):
-        self._thread.start()
-        
-    def stop(self):
-        self.socket.shutdown()
+        self.worker1()
+        # self._thread.start()
 
 class SocketRosNode:
     def __init__(self, data_communicator):
@@ -188,5 +190,3 @@ if __name__ == '__main__':
     while not rospy.is_shutdown():
         print("loop")
         time.sleep(1)
-        
-    communicator.stop()
