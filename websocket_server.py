@@ -17,7 +17,12 @@ socket = socketio.Server(async_mode='eventlet')
 app = socketio.WSGIApp(socket)
 
 data_test_ = {"data": None}
+
 data_ = {"odom": None, "point_cloud": None, "mesh": None}
+
+commands_ = {"is_pointcloud": False, "is_mesh": False, "target_pose": None}
+
+init_data_ = {"tf_device_to_odom": None, "tf_odom_to_base": None}
 
 class SocketRosNode:
     def __init__(self):
@@ -29,8 +34,14 @@ class SocketRosNode:
         self.odometry_sub = rospy.Subscriber('robot_odom', Odometry, self.odometry_callback)
         self.mesh_sub = rospy.Subscriber('elevation_map', Mesh, self.mesh_callback)
         
+        # set current odom
+        self.current_odom = np.eye(4).flatten().tolist()
+        
         # Initialize a service server
         self.service = rospy.Service('generate_synthetic_data', Trigger, self.handle_generate_synthetic_data)
+        
+        # timer event callback to call the service
+        rospy.Timer(rospy.Duration(2.0), self.timer_callback)
         
         # print statrting message
         rospy.loginfo("Socket ROS node started, starting data communicator... \n")
@@ -57,7 +68,7 @@ class SocketRosNode:
         return xyz_array
     
     def handle_generate_synthetic_data(self, request):
-        self.generate_synthetic_test_data()
+        self.generate_synthetic_data()
         # send data update
         print("send data update")
         return TriggerResponse(
@@ -65,11 +76,23 @@ class SocketRosNode:
             message="Synthetic data generated successfully"
         )
         
+    def timer_callback(self, event):
+        # make a service call to on service server generate_synthetic_data
+        rospy.wait_for_service('generate_synthetic_data')
+        try:
+            generate_call = rospy.ServiceProxy('generate_synthetic_data', Trigger)
+            resp = generate_call()
+            print(resp.message)
+        except rospy.ServiceException as e:
+            print("Service call failed: %s"%e)
+        
     def generate_synthetic_data(self):
         # Generate synthetic point cloud data
         N = 100  # Number of points
-        point_cloud_np = np.random.rand(N, 3)
-        data_["point_cloud"] = point_cloud_np.tolist()  # Convert to list of lists
+        cloud_pose = np.eye(4).flatten().tolist()  # Replace with actual computation
+        point_cloud_np = np.random.rand(N, 3).flatten().tolist()  # Replace with actual computation
+        cloud_data = {"frame_pose": cloud_pose, "data": point_cloud_np}  # Convert to list of lists
+        data_["point_cloud"] = cloud_data  # Convert to list of lists
 
         # Generate synthetic odometry data
         random_translation = np.random.rand(3)
@@ -77,40 +100,35 @@ class SocketRosNode:
         synthetic_odom = np.eye(4)
         synthetic_odom[:3, :3] = random_rotation_matrix[:3, :3]
         synthetic_odom[:3, 3] = random_translation
-        data_["odom"] = synthetic_odom.tolist()  # Convert to list of lists
+        self.current_odom = synthetic_odom
+        init_data_["tf_odom_to_base"] = synthetic_odom
+        
+        # convert to list of lists
+        odom_data = {"frame_pose": synthetic_odom.flatten().tolist()}
+        data_["odom"] = odom_data  # Convert to list of lists
 
         # Generate synthetic mesh data
-        N2 = 50  # Number of vertices
-        mesh_np = np.random.rand(N2, 3)
-        data_["mesh"] = mesh_np.tolist()  # Convert to list of lists
-        
-    def generate_synthetic_test_data(self):
-        # Generate synthetic point cloud data
-        num_points = 1000
-        radius = 0.2
-        # Generate uniform angles
-        theta = np.random.uniform(0, 2*np.pi, num_points)
-        phi = np.arccos(np.random.uniform(-1, 1, num_points))
-
-        # Convert spherical coordinates to Cartesian coordinates and scale by radius
-        x = radius * np.sin(phi) * np.cos(theta)
-        y = radius * np.sin(phi) * np.sin(theta)
-        z = radius * np.cos(phi)
-
-        # Combine x, y, z into a single array and round
-        points = np.stack((x, y, z), axis=-1)
-        points = np.round(points, 3)
-        
-        # flatten to list
-        points = points.flatten()
-        
-        data_test_["data"] = points.tolist()  # Convert to list of lists
+        mesh_pose = np.eye(4).flatten().tolist()  # Replace with actual computation
+        mesh_np = np.random.rand(64, 64).flatten().tolist()  # Replace with actual computation
+        data_["mesh"] = {"frame_pose": mesh_pose, "data": mesh_np}  # Convert to list of lists
         
 
     def point_cloud_callback(self, data):
         # Convert PointCloud2 to numpy array (N, 3)
         pc_np = SocketRosNode.pointcloud2_to_xyz_array(data)
-        data_["point_cloud"] = pc_np
+        # check if device to odom TF is received
+        if init_data_["tf_device_to_odom"] is None:
+            rospy.loginfo("No device to odom TF received yet, skipping point cloud data")
+            return
+        if data.header.frame_id != "base_link":
+            rospy.loginfo("Point cloud frame is not base_link, skipping point cloud data")
+            return
+        cloud_pose = init_data_["tf_device_to_odom"] @ self.current_odom
+        # Convert to list of lists
+        pc_np = pc_np.flatten().tolist()
+        cloud_pose = cloud_pose.flatten().tolist()
+        point_data = {"frame_pose": cloud_pose, "data": pc_np}  # Convert to list of lists
+        data_["point_cloud"] = point_data
         rospy.loginfo("Updated point cloud data")
 
     def odometry_callback(self, data):
@@ -127,45 +145,56 @@ class SocketRosNode:
         transformation_matrix = np.eye(4)
         transformation_matrix[:3, :3] = rotation_matrix
         transformation_matrix[:3, 3] = translation
-
-        data_["odom"] = transformation_matrix
+        self.current_odom = transformation_matrix
+        init_data_["tf_odom_to_base"] = transformation_matrix
+        
+        # Convert to list of lists
+        transformation_matrix = transformation_matrix.flatten().tolist()
+        odom_data = {"frame_pose": transformation_matrix}  # Convert to list of lists
+        data_["odom"] = odom_data
+        self.current_odom = transformation_matrix
         rospy.loginfo("Updated odometry data")
+        
+    def convert_mesh_to_numpy(self, mesh):
+        # return arary of vertices (N2, 3), convert to numpy array of size 64 * 64 with z information
+        # fake data: TODO: replace with actual computation
+        mesh_np = np.random.rand(64, 64)
+        return mesh_np
 
     def mesh_callback(self, data):
-        # Convert Mesh to numpy array of vertices (N2, 3)
-        vertices = np.array([[vertex.x, vertex.y, vertex.z] for vertex in data.vertices])
-        data_["mesh"] = vertices
+        # get the current tf of data frame to odom
+        if init_data_["tf_device_to_odom"] is None:
+            rospy.loginfo("No device to odom TF received yet, skipping mesh data")
+            return
+        if data.header.frame_id != "base_link":
+            # convert the frame to base_link using tf2
+            rospy.loginfo("Mesh frame is not base_link, skipping mesh data")
+            return
+        mesh_pose = init_data_["tf_device_to_odom"] @ self.current_odom
+        mesh_np = self.convert_mesh_to_numpy(data)
+        # Convert to list of lists
+        mesh_np = mesh_np.flatten().tolist()
+        mesh_pose = mesh_pose.flatten().tolist()
+        mesh_data = {"frame_pose": mesh_pose, "data": mesh_np}
+        data_["mesh"] = mesh_data
         rospy.loginfo("Updated mesh data")
 
-def worker1():
+def start_socket_server():
     eventlet.wsgi.server(eventlet.listen(('', 5030)), app)
 
-
-# def generate_points(num_points, radius=1.0):
-#     # Generate uniform angles
-#     theta = np.random.uniform(0, 2*np.pi, num_points)
-#     phi = np.arccos(np.random.uniform(-1, 1, num_points))
-
-#     # Convert spherical coordinates to Cartesian coordinates and scale by radius
-#     x = radius * np.sin(phi) * np.cos(theta)
-#     y = radius * np.sin(phi) * np.sin(theta)
-#     z = radius * np.cos(phi)
-
-#     # Combine x, y, z into a single array and round
-#     points = np.stack((x, y, z), axis=-1)
-#     points = np.round(points, 3)
-    
-#     # flatten
-#     points = points.flatten()
-
-#     return points.tolist()
-
 @socket.on('target_pose')  # Listening for 'client_message' event
-def handle_client_message(sid, message):
-    pose = decode_transformation_matrix(message)
-    print(f"Received message from client {sid}")
-    print(pose)
+def handle_client_message1(sid, message):
+    commands_["target_pose"] = decode_transformation_matrix(message)
+    print(f"Received target message from client {sid}")
+    print(commands_["target_pose"])
     
+@socket.on('init_data')  # Listening for 'client_message' event
+def handle_client_message2(sid, message):
+    device_to_base = decode_transformation_matrix(message)
+    device_to_odom = np.matmul(np.linalg.inv(init_data_["tf_odom_to_base"]), device_to_base)
+    init_data_["tf_device_to_odom"] = device_to_odom
+    print(f"Received device transofrm TF from client {sid}")
+    print(init_data_["tf_base_to_device"])
 
 def decode_transformation_matrix(json_string):
     # Parse the JSON string
@@ -179,20 +208,37 @@ def decode_transformation_matrix(json_string):
 
     return transformation_matrix
 
-def worker2(data):
+def pointcloud_worker():
     while(1):
-        # data = {"data": generate_points(1000, radius=0.2)}
-        if data["data"] is not None:
-            print("send msg")
-            socket.emit('point_cloud', json.dumps(data))
-            data["data"] = None
-        socket.sleep(1)
+        if commands_["is_pointcloud"] and data_["point_cloud"] is not None:
+            print("send point cloud")
+            socket.emit('point_cloud', json.dumps(data_["point_cloud"]))
+            data_["point_cloud"] = None
+        socket.sleep(0.5) # 2 Hz
+        
+def mesh_worker():
+    while(1):
+        if commands_["is_mesh"] and data_["mesh"] is not None:
+            print("send mesh")
+            socket.emit('mesh', json.dumps(data_["mesh"]))
+            data_["mesh"] = None
+        socket.sleep(0.5) # 2 Hz
+        
+def odom_worker():
+    while(1):
+        if data_["odom"] is not None:
+            print("send odom")
+            socket.emit('odom', json.dumps(data_["odom"]))
+            data_["odom"] = None
+        socket.sleep(0.05) # 20 Hz
 
 def main():
     # ros_thread = eventlet.spawn(SocketRosNode)
     SocketRosNode()
-    socket.start_background_task(worker2, data_test_)
-    worker1()
+    socket.start_background_task(pointcloud_worker)
+    socket.start_background_task(mesh_worker)
+    socket.start_background_task(odom_worker)
+    start_socket_server()
 
 if __name__ == '__main__':
     main()
