@@ -69,11 +69,10 @@ class SocketRosNode:
     
     def handle_generate_synthetic_data(self, request):
         self.generate_synthetic_data()
-        # send data update
-        print("send data update")
+        # sysnthetic data generated successfully
         return TriggerResponse(
             success=True,
-            message="Synthetic data generated successfully"
+            message="==================================\nSynthetic data generated successfully"
         )
         
     def timer_callback(self, event):
@@ -95,7 +94,8 @@ class SocketRosNode:
         data_["point_cloud"] = cloud_data  # Convert to list of lists
 
         # Generate synthetic odometry data
-        random_translation = np.random.rand(3)
+        # random_translation = np.random.rand(3)
+        random_translation = np.array([0.0, 0.0, 0.0])
         random_rotation_matrix = np.identity(4)  # Replace with actual computation
         synthetic_odom = np.eye(4)
         synthetic_odom[:3, :3] = random_rotation_matrix[:3, :3]
@@ -108,8 +108,9 @@ class SocketRosNode:
         data_["odom"] = odom_data  # Convert to list of lists
 
         # Generate synthetic mesh data
+        N = 65 # Number of grid dimensions
         mesh_pose = np.eye(4).flatten().tolist()  # Replace with actual computation
-        mesh_np = np.random.rand(64, 64).flatten().tolist()  # Replace with actual computation
+        mesh_np = np.random.rand(N, N).flatten().tolist()  # Replace with actual computation
         data_["mesh"] = {"frame_pose": mesh_pose, "data": mesh_np}  # Convert to list of lists
         
 
@@ -195,6 +196,20 @@ def handle_client_message2(sid, message):
     init_data_["tf_device_to_odom"] = device_to_odom
     print(f"Received device transofrm TF from client {sid}")
     print(init_data_["tf_base_to_device"])
+    
+@socket.on('is_pointcloud')  # Listening for 'client_message' event
+def handle_client_message3(sid, message):
+    # decode bool message
+    commands_["is_pointcloud"] = decode_bool(message)
+    print(f"Received point cloud command from client {sid}")
+    print(commands_["is_pointcloud"])
+    
+@socket.on('is_mesh')  # Listening for 'client_message' event
+def handle_client_message4(sid, message):
+    # decode bool message
+    commands_["is_mesh"] = decode_bool(message)
+    print(f"Received mesh command from client {sid}")
+    print(commands_["is_mesh"])
 
 def decode_transformation_matrix(json_string):
     # Parse the JSON string
@@ -207,6 +222,15 @@ def decode_transformation_matrix(json_string):
     transformation_matrix = np.array(matrix_values).reshape(4, 4)
 
     return transformation_matrix
+
+def decode_bool(json_string):
+    # Parse the JSON string
+    data = json.loads(json_string)
+
+    # Extract the matrix values
+    bool_value = data['bool']
+
+    return bool_value
 
 def pointcloud_worker():
     while(1):
