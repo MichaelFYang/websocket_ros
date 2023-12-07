@@ -31,8 +31,8 @@ class SocketRosNode:
         rospy.init_node('socket_ros_node', disable_signals=True)
 
         # Create subscribers
-        self.point_cloud_sub = rospy.Subscriber('point_cloud', PointCloud2, self.point_cloud_callback)
-        self.odometry_sub = rospy.Subscriber('robot_odom', Odometry, self.odometry_callback)
+        self.point_cloud_sub = rospy.Subscriber('/point_cloud_filter_rsl/filter_and_merger_rsl', PointCloud2, self.point_cloud_callback)
+        self.odometry_sub = rospy.Subscriber('/state_estimator/pose_in_odom', Odometry, self.odometry_callback)
         self.mesh_sub = rospy.Subscriber('/elevation_mapping/elevation_map_raw', GridMap, self.mesh_callback)
         
         # set current odom
