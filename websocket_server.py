@@ -157,11 +157,15 @@ class SocketRosNode:
         self.current_odom = transformation_matrix
         rospy.loginfo("Updated odometry data")
         
-    def convert_mesh_to_numpy(self, mesh):
+    def convert_mesh_to_numpy(self, msg):
         # return arary of vertices (N2, 3), convert to numpy array of size 64 * 64 with z information
         # fake data: TODO: replace with actual computation
-        mesh_np = np.random.rand(64, 64)
-        return mesh_np
+        LAYER = 0
+        mesh_np = np.array(msg.data[LAYER].data)
+        res = msg.info.resolution
+        dim = msg.shape[0]
+        # mesh_np = np.random.rand(64, 64)
+        return mesh_np, res, dim
 
     def mesh_callback(self, data):
         # get the current tf of data frame to odom
