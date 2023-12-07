@@ -176,11 +176,11 @@ class SocketRosNode:
             rospy.loginfo("No device to odom TF received yet, skipping mesh data")
             return
         mesh_pose = init_data_["tf_device_to_odom"] @ self.current_odom
-        mesh_np = self.convert_mesh_to_numpy(data)
+        mesh_np, res, dim = self.convert_mesh_to_numpy(data)
         # Convert to list of lists
         mesh_np = mesh_np.flatten().tolist()
         mesh_pose = mesh_pose.flatten().tolist()
-        mesh_data = {"frame_pose": mesh_pose, "data": mesh_np}
+        mesh_data = {"frame_pose": mesh_pose, "res": res, "dim": dim,"data": mesh_np}
         data_["mesh"] = mesh_data
         rospy.loginfo("Updated mesh data")
 
