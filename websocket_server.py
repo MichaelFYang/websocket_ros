@@ -166,7 +166,7 @@ class SocketRosNode:
         LAYER = 0
         mesh_np = np.array(msg.data[LAYER].data)
         res = msg.info.resolution
-        dim = msg.shape[0]
+        dim = mesh_np.shape[0]
         # mesh_np = np.random.rand(64, 64)
         return mesh_np, res, dim
 
