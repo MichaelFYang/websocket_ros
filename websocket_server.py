@@ -16,12 +16,15 @@ from shape_msgs.msg import Mesh
 from scipy.spatial.transform import Rotation
 from std_srvs.srv import Trigger, TriggerResponse
 
-socket = socketio.Server(async_mode='eventlet', always_connect=True)
+import socket as socket_lib
+socket_lib.setdefaulttimeout(1e9)
+
+socket = socketio.Server(async_mode='eventlet', always_connect=True, ping_timeout=1e9, ping_interval=1e9)
 app = socketio.WSGIApp(socket)
 
 data_test_ = {"data": None}
 
-data_ = {"odom": None, "point_cloud": None, "mesh": None}
+data_ = {"odom": None, "point_cloud": None, "mesh": None, "path": None}
 
 commands_ = {"is_pointcloud": False, "is_mesh": False, "target_pose": None}
 
@@ -45,6 +48,7 @@ class SocketRosNode:
         
         # timer event callback to call the service
         # rospy.Timer(rospy.Duration(1.0), self.timer_callback)
+        rospy.Timer(rospy.Duration(1.0), self.goal_callback) # 1hz
         
         # fake TF to device
         init_data_["tf_device_to_odom"] = np.eye(4)
@@ -80,6 +84,24 @@ class SocketRosNode:
             success=True,
             message="==================================\nSynthetic data generated successfully"
         )
+        
+    def goal_callback(self, event):
+        if commands_["target_pose"] is not None:
+            # write the path to data_["path"]
+            device_to_base = init_data_["tf_device_to_odom"] @ self.odom_to_base
+            device_to_target = commands_["target_pose"]
+            device_to_base_pos = device_to_base[:3, 3]
+            device_to_target_pos = device_to_target[:3, 3]
+            # generate a path with 5 points
+            path = np.zeros((5, 3))
+            for i in range(5):
+                path[i, :] = device_to_base_pos + (device_to_target_pos - device_to_base_pos) * i / 4
+                # add some noise
+                path[i, :] += np.random.normal(0, 0.1, 3)
+            # convert to list of lists
+            path = path.flatten().tolist()
+            data_["path"] = path
+            commands_["target_pose"] = None
         
     def timer_callback(self, event):
         # make a service call to on service server generate_synthetic_data
@@ -124,7 +146,9 @@ class SocketRosNode:
         # Convert PointCloud2 to numpy array (N, 3) using ros_numpy
         pc_np = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(data)
         print("size of the points: ", pc_np.shape[0])
-        pc_np = pc_np[::10, :]
+        pc_np = pc_np[::5, :]
+        # round pc_np to 3 decimal places
+        pc_np = np.round(pc_np, 2)
         # check if device to odom TF is received
         if init_data_["tf_device_to_odom"] is None:
             rospy.loginfo("No device to odom TF received yet, skipping point cloud data")
@@ -132,7 +156,8 @@ class SocketRosNode:
         if data.header.frame_id != "lidar": # need to transer to base link
             rospy.loginfo("Point cloud frame is not base_link, skipping point cloud data")
             return
-        # Convert to list of lists
+        
+        # get the transformation from base to lidar [Camel] 
         base_to_lidar = np.eye(4)
         base_to_lidar[:3, :3] = Rotation.from_quat([0.000, 0.000, -0.707, 0.707]).as_matrix()
         base_to_lidar[:3, 3] = np.array([-0.364, 0.000, 0.142])
@@ -159,8 +184,8 @@ class SocketRosNode:
         transformation_matrix = np.eye(4)
         transformation_matrix[:3, :3] = rotation_matrix
         transformation_matrix[:3, 3] = translation
-        self.odom_to_base = transformation_matrix
-        init_data_["tf_odom_to_base"] = transformation_matrix
+        self.odom_to_base = transformation_matrix.copy()
+        init_data_["tf_odom_to_base"] = transformation_matrix.copy()
 
         transformation_matrix = init_data_["tf_device_to_odom"] @ self.odom_to_base
         print("odom trans update info: ", translation)
@@ -174,24 +199,50 @@ class SocketRosNode:
         # return arary of vertices (N2, 3), convert to numpy array of size 64 * 64 with z information
         # fake data: TODO: replace with actual computation
         LAYER = 0
-        mesh_np = np.array(msg.data[LAYER].data)
         res = msg.info.resolution
-        dim = mesh_np.shape[0]
+        dim_x = int(msg.info.length_x / msg.info.resolution)
+        dim_y = int(msg.info.length_y / msg.info.resolution)
+        mesh_np = np.array(msg.data[LAYER].data).reshape(dim_x, dim_y)
+        # crop and downsample
+        mesh_np = mesh_np[50:150:2, 50:150:2]
+        dim_x = mesh_np.shape[0]
+        dim_y = mesh_np.shape[1]
+        res *= 2
+        # remove the nan values
+        mesh_np = np.nan_to_num(mesh_np, nan=-1e3)
+        # round to 2 decimal places
+        mesh_np = np.round(mesh_np, 2)        
         # mesh_np = np.random.rand(64, 64)
-        return mesh_np, res, dim
+        return mesh_np, res, dim_x, dim_y
+    
+    def geometry_msgs_pose_to_transformation_matrix(self, pose):
+        # convert geometry_msgs/PoseStamped to 4x4 transformation matrix
+        position = pose.position
+        orientation = pose.orientation
+        translation = np.array([position.x, position.y, position.z])
+        quaternion = [orientation.x, orientation.y, orientation.z, orientation.w]
+        pose_matrix = np.eye(4)
+        pose_matrix[:3, 3] = translation
+        # Create a rotation object from the quaternion and convert it to a matrix
+        rotation_matrix = Rotation.from_quat(quaternion).as_matrix()
+        # Create the transformation matrix
+        pose_matrix[:3, :3] = rotation_matrix
+        return pose_matrix
 
     def mesh_callback(self, data):
         # get the current tf of data frame to odom
         if init_data_["tf_device_to_odom"] is None:
             rospy.loginfo("No device to odom TF received yet, skipping mesh data")
             return
-        mesh_pose = init_data_["tf_device_to_odom"] @ self.odom_to_base
-        mesh_np, res, dim = self.convert_mesh_to_numpy(data)
+        # convert geometry_msgs/PoseStamped to 4x4 transformation matrix
+        odom_to_ele = self.geometry_msgs_pose_to_transformation_matrix(data.info.pose)        
+        mesh_pose = init_data_["tf_device_to_odom"] @ odom_to_ele
+        mesh_np, res, dim_x, dim_y = self.convert_mesh_to_numpy(data)
         # Convert to list of lists
         mesh_np = mesh_np.flatten().tolist()
         mesh_pose = mesh_pose.flatten().tolist()
-        # mesh_data = {"frame_pose": mesh_pose, "res": res, "dim": dim,"data": mesh_np}
-        mesh_data = {"frame_pose": mesh_pose, "data": mesh_np}
+        mesh_data = {"frame_pose": mesh_pose, "res": res, "dim_x": dim_x, "dim_y": dim_y, "data": mesh_np}
+        # mesh_data = {"frame_pose": mesh_pose, "data": mesh_np}
         data_["mesh"] = mesh_data
         rospy.loginfo("Updated mesh data")
 
@@ -265,6 +316,14 @@ def mesh_worker():
             print("send mesh")
             socket.emit('mesh', json.dumps(data_["mesh"]))
             data_["mesh"] = None
+        socket.sleep(0.5) # 5 Hz
+        
+def path_worker():
+    while(1):
+        if data_["path"] is not None:
+            print("send path")
+            socket.emit('path', json.dumps(data_["path"]))
+            data_["path"] = None
         socket.sleep(0.5) # 5 Hz
         
 def odom_worker():
