@@ -37,7 +37,7 @@ class SocketRosNode:
         self.mesh_sub = rospy.Subscriber('/elevation_mapping/elevation_map_raw', GridMap, self.mesh_callback)
         
         # set current odom
-        self.current_odom = np.eye(4).flatten().tolist()
+        self.current_odom = np.eye(4)
         
         # Initialize a service server
         self.service = rospy.Service('generate_synthetic_data', Trigger, self.handle_generate_synthetic_data)
@@ -126,7 +126,7 @@ class SocketRosNode:
         if init_data_["tf_device_to_odom"] is None:
             rospy.loginfo("No device to odom TF received yet, skipping point cloud data")
             return
-        if data.header.frame_id != "base_link":
+        if data.header.frame_id != "lidar": # need to transer to base link
             rospy.loginfo("Point cloud frame is not base_link, skipping point cloud data")
             return
         cloud_pose = init_data_["tf_device_to_odom"] @ self.current_odom
@@ -158,7 +158,6 @@ class SocketRosNode:
         transformation_matrix = transformation_matrix.flatten().tolist()
         odom_data = {"frame_pose": transformation_matrix}  # Convert to list of lists
         data_["odom"] = odom_data
-        self.current_odom = transformation_matrix
         rospy.loginfo("Updated odometry data")
         
     def convert_mesh_to_numpy(self, msg):
