@@ -10,7 +10,6 @@ import rospy
 from grid_map_msgs.msg import GridMap
 from sensor_msgs.msg import PointCloud2
 from nav_msgs.msg import Odometry
-from shape_msgs.msg import Mesh
 from scipy.spatial.transform import Rotation
 from std_srvs.srv import Trigger, TriggerResponse
 
@@ -42,7 +41,7 @@ class SocketRosNode:
         self.service = rospy.Service('generate_synthetic_data', Trigger, self.handle_generate_synthetic_data)
         
         # timer event callback to call the service
-        # rospy.Timer(rospy.Duration(1.0), self.timer_callback)
+        rospy.Timer(rospy.Duration(1.0), self.timer_callback)
         
         # print statrting message
         rospy.loginfo("Socket ROS node started, starting data communicator... \n")
@@ -88,7 +87,7 @@ class SocketRosNode:
         
     def generate_synthetic_data(self):
         # Generate synthetic point cloud data
-        N = 5000  # Number of points
+        N = 200  # Number of points
         cloud_pose = np.eye(4).flatten().tolist()  # Replace with actual computation
         point_cloud_np = np.random.rand(N, 3).flatten().tolist()  # Replace with actual computation
         cloud_data = {"frame_pose": cloud_pose, "data": point_cloud_np}  # Convert to list of lists
@@ -157,11 +156,15 @@ class SocketRosNode:
         self.current_odom = transformation_matrix
         rospy.loginfo("Updated odometry data")
         
-    def convert_mesh_to_numpy(self, mesh):
+    def convert_mesh_to_numpy(self, msg):
         # return arary of vertices (N2, 3), convert to numpy array of size 64 * 64 with z information
         # fake data: TODO: replace with actual computation
-        mesh_np = np.random.rand(64, 64)
-        return mesh_np
+        LAYER = 0
+        mesh_np = np.array(msg.data[LAYER].data)
+        res = msg.info.resolution
+        dim = msg.shape[0]
+        # mesh_np = np.random.rand(64, 64)
+        return mesh_np, res, dim
 
     def mesh_callback(self, data):
         # get the current tf of data frame to odom
@@ -169,11 +172,11 @@ class SocketRosNode:
             rospy.loginfo("No device to odom TF received yet, skipping mesh data")
             return
         mesh_pose = init_data_["tf_device_to_odom"] @ self.current_odom
-        mesh_np = self.convert_mesh_to_numpy(data)
+        mesh_np, res, dim = self.convert_mesh_to_numpy(data)
         # Convert to list of lists
         mesh_np = mesh_np.flatten().tolist()
         mesh_pose = mesh_pose.flatten().tolist()
-        mesh_data = {"frame_pose": mesh_pose, "data": mesh_np}
+        mesh_data = {"frame_pose": mesh_pose, "res": res, "dim": dim,"data": mesh_np}
         data_["mesh"] = mesh_data
         rospy.loginfo("Updated mesh data")
 
