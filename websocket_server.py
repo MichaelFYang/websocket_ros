@@ -7,6 +7,7 @@ import time
 
 # ROS modules
 import rospy
+import ros_numpy
 from grid_map_msgs.msg import GridMap
 from sensor_msgs.msg import PointCloud2
 from nav_msgs.msg import Odometry
@@ -116,8 +117,8 @@ class SocketRosNode:
         
 
     def point_cloud_callback(self, data):
-        # Convert PointCloud2 to numpy array (N, 3)
-        pc_np = SocketRosNode.pointcloud2_to_xyz_array(data)
+        # Convert PointCloud2 to numpy array (N, 3) using ros_numpy
+        pc_np = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(data)
         # check if device to odom TF is received
         if init_data_["tf_device_to_odom"] is None:
             rospy.loginfo("No device to odom TF received yet, skipping point cloud data")
