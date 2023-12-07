@@ -45,6 +45,9 @@ class SocketRosNode:
         # timer event callback to call the service
         # rospy.Timer(rospy.Duration(1.0), self.timer_callback)
         
+        # fake TF to device
+        init_data_["tf_device_to_odom"] = np.eye(4)
+        
         # print statrting message
         rospy.loginfo("Socket ROS node started, starting data communicator... \n")
 
