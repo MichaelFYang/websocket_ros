@@ -60,7 +60,7 @@ class SocketRosNode:
         # timer event callback to call the service
         # rospy.Timer(rospy.Duration(1.0), self.timer_callback)
         rospy.Timer(rospy.Duration(1.0), self.goal_callback) # 1hz
-        rospy.Timer(rospy.Duration(1.0), self.path_following_client) # 1hz
+        rospy.Timer(rospy.Duration(0.5), self.path_following_client) # 1hz
         
         self.cur_odom_to_goal = None
         
@@ -188,6 +188,7 @@ class SocketRosNode:
             odom_to_goal = np.linalg.inv(init_data_["tf_device_to_odom"]) @ commands_["target_pose"]
             # z shift 0.5m (robot height)
             odom_to_goal[2, 3] += 0.5
+            print("Goal Sent from websocket server!!!!!")
             self.waypointPublisher(odom_to_goal)
             # # write the path to data_["path"]
             # device_to_base = init_data_["tf_device_to_odom"] @ self.odom_to_base
@@ -250,22 +251,24 @@ class SocketRosNode:
         pc_np = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(data)
         # print("size of the points: ", pc_np.shape[0])
         pc_np = pc_np[::10, :]
+        print("size of the points: ", pc_np.shape[0])
         # round pc_np to 3 decimal places
         pc_np = np.round(pc_np, 2)
         # check if device to odom TF is received
         if init_data_["tf_device_to_odom"] is None:
             rospy.loginfo("No device to odom TF received yet, skipping point cloud data")
             return
-        if data.header.frame_id != "lidar": # need to transer to base link
-            rospy.loginfo("Point cloud frame is not base_link, skipping point cloud data")
-            return
+        # if data.header.frame_id != "lidar": # need to transer to base link
+        #     rospy.loginfo("Point cloud frame is not base_link, skipping point cloud data")
+        #     return
         
-        # get the transformation from base to lidar [Camel] 
-        base_to_lidar = np.eye(4)
-        base_to_lidar[:3, :3] = Rotation.from_quat([0.000, 0.000, -0.707, 0.707]).as_matrix()
-        base_to_lidar[:3, 3] = np.array([-0.364, 0.000, 0.142])
+        # # get the transformation from base to lidar [Camel] 
+        # base_to_lidar = np.eye(4)
+        # base_to_lidar[:3, :3] = Rotation.from_quat([0.000, 0.000, -0.707, 0.707]).as_matrix()
+        # base_to_lidar[:3, 3] = np.array([-0.364, 0.000, 0.142])
 
-        cloud_pose = init_data_["tf_device_to_odom"] @ self.odom_to_base @ base_to_lidar
+        # cloud_pose = init_data_["tf_device_to_odom"] @ self.odom_to_base @ base_to_lidar
+        cloud_pose = init_data_["tf_device_to_odom"]
         # Convert to list of lists
         pc_np = pc_np.flatten().tolist()
         cloud_pose = cloud_pose.flatten().tolist()
@@ -420,7 +423,7 @@ def pointcloud_worker():
             print("send point cloud")
             socket.emit('point_cloud', json.dumps(data_["point_cloud"]))
             data_["point_cloud"] = None
-        socket.sleep(0.5) # 5 Hz
+        socket.sleep(1.0) # 5 Hz
         
 def mesh_worker():
     while(1):
@@ -428,7 +431,7 @@ def mesh_worker():
             print("send mesh")
             socket.emit('mesh', json.dumps(data_["mesh"]))
             data_["mesh"] = None
-        socket.sleep(0.5) # 5 Hz
+        socket.sleep(1.0) # 5 Hz
         
 def path_worker():
     while(1):
