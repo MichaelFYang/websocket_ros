@@ -45,7 +45,7 @@ class SocketRosNode:
         self.previous_command = True
 
         # Create subscribers
-        self.point_cloud_sub = rospy.Subscriber('/point_cloud_filter_rsl/filter_and_merger_rsl', PointCloud2, self.point_cloud_callback)
+        self.point_cloud_sub = rospy.Subscriber('/terrain_map', PointCloud2, self.point_cloud_callback)
         self.odometry_sub = rospy.Subscriber('/state_estimator/pose_in_odom', PoseWithCovarianceStamped, self.odometry_callback)
         self.mesh_sub = rospy.Subscriber('/elevation_mapping/elevation_map_raw', GridMap, self.mesh_callback)
         self.plan_path_sub = rospy.Subscriber('/path', Path, self.plan_path_callback)
@@ -55,7 +55,7 @@ class SocketRosNode:
     
         
         # Initialize a service server
-        self.service = rospy.Service('generate_synthetic_data', Trigger, self.handle_generate_synthetic_data)
+        # self.service = rospy.Service('generate_synthetic_data', Trigger, self.handle_generate_synthetic_data)
             
         # timer event callback to call the service
         # rospy.Timer(rospy.Duration(1.0), self.timer_callback)
@@ -249,7 +249,7 @@ class SocketRosNode:
         # Convert PointCloud2 to numpy array (N, 3) using ros_numpy
         pc_np = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(data)
         # print("size of the points: ", pc_np.shape[0])
-        pc_np = pc_np[::5, :]
+        pc_np = pc_np[::10, :]
         # round pc_np to 3 decimal places
         pc_np = np.round(pc_np, 2)
         # check if device to odom TF is received
