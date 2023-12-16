@@ -4,6 +4,8 @@ import eventlet
 import numpy as np
 import json
 import time
+import math
+from scipy.interpolate import splprep, splev
 
 # ROS modules
 import rospy
@@ -60,6 +62,8 @@ class SocketRosNode:
         rospy.Timer(rospy.Duration(1.0), self.goal_callback) # 1hz
         rospy.Timer(rospy.Duration(1.0), self.path_following_client) # 1hz
         
+        self.cur_odom_to_goal = None
+        
         # print statrting message
         rospy.loginfo("Socket ROS node started, starting data communicator... \n")
 
@@ -103,10 +107,53 @@ class SocketRosNode:
         waypoint_msg.header.stamp = rospy.Time.now()
         waypoint_msg.point.x = pose[0, 3]
         waypoint_msg.point.y = pose[1, 3]
-        waypoint_msg.point.z = pose[2, 3] + 0.5
+        waypoint_msg.point.z = pose[2, 3]
         self.waypoint_pub.publish(waypoint_msg)
         
+    def _determine_num_points(self, x, y, z, distance_resolution=0.2):
+        """
+        Determines the number of points for B-spline interpolation based on distance resolution.
+        :param x, y, z: Lists of x, y, z coordinates of trajectory points.
+        :param distance_resolution: Desired distance between interpolated points.
+        :return: Number of points for interpolation.
+        """
+        total_distance = sum(math.sqrt((x[i+1] - x[i])**2 + (y[i+1] - y[i])**2 + (z[i+1] - z[i])**2) 
+                             for i in range(len(x) - 1))
+        return max(int(total_distance / distance_resolution), 2)  # At least two points
+    
+    def interpolatePath(self, path):
+        # Convert to world coordinates and separate into x, y, z lists
+        x, y, z = [], [], []
+        const_z = path.poses[0].pose.position.z
+        N = len(path.poses)
+        for i in range(N):
+            x.append(path.poses[i].pose.position.x)
+            y.append(path.poses[i].pose.position.y)
+            z.append(const_z)
+            
+        # add goal point
+        # convert it to base frame
+        base_to_goal = np.linalg.inv(self.odom_to_base) @ self.cur_odom_to_goal
+        x.append(base_to_goal[0, 3])
+        y.append(base_to_goal[1, 3])
+        z.append(const_z)
+
+        # Apply B-spline interpolation
+        tck, u = splprep([x, y, z], s=0)
+        u_new = np.linspace(u.min(), u.max(), self._determine_num_points(x, y, z, 0.1))
+        x_new, y_new, z_new = splev(u_new, tck)
+        # combine x_new, y_new, z_new to an array
+        path_np = np.zeros((len(x_new), 3))
+        path_np[:, 0] = x_new
+        path_np[:, 1] = y_new
+        path_np[:, 2] = z_new
+        return path_np
+    
+        
     def plan_path_callback(self, data):
+        if  self.cur_odom_to_goal is None:
+            rospy.loginfo_throttle(1, "No goal received yet, skipping path data")
+            return
         # write the path to data_["path"], the path is at the base frame, need to convert it to device frame
         # check if device to odom TF is received
         if init_data_["tf_device_to_odom"] is None:
@@ -119,14 +166,10 @@ class SocketRosNode:
         
         # print("path received!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         
-        path = np.zeros((len(data.poses), 3))
-        for i in range(len(data.poses)):
-            path[i, 0] = data.poses[i].pose.position.x
-            path[i, 1] = data.poses[i].pose.position.y
-            path[i, 2] = data.poses[i].pose.position.z
+        path_np = self.interpolatePath(data)
         # convert to device frame
         device_to_base = init_data_["tf_device_to_odom"] @ self.odom_to_base
-        path_data = {"frame_pose": device_to_base.flatten().tolist(), "data": path.flatten().tolist()}
+        path_data = {"frame_pose": device_to_base.flatten().tolist(), "data": path_np.flatten().tolist()}
         data_["path"] = path_data
         # rospy.loginfo("Updated path data")
         
@@ -143,6 +186,8 @@ class SocketRosNode:
         if commands_["target_pose"] is not None:
             # target pose is device to goal, and need odom_to_goal
             odom_to_goal = np.linalg.inv(init_data_["tf_device_to_odom"]) @ commands_["target_pose"]
+            # z shift 0.5m (robot height)
+            odom_to_goal[2, 3] += 0.5
             self.waypointPublisher(odom_to_goal)
             # # write the path to data_["path"]
             # device_to_base = init_data_["tf_device_to_odom"] @ self.odom_to_base
@@ -158,6 +203,7 @@ class SocketRosNode:
             # # convert to list of lists
             # path = path.flatten().tolist()
             # data_["path"] = path
+            self.cur_odom_to_goal  = odom_to_goal
             commands_["target_pose"] = None
         
     def timer_callback(self, event):
