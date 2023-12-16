@@ -392,7 +392,14 @@ def handle_client_message4(sid, message):
 @socket.on('go_to_target')  # Listening for 'client_message' event
 def handle_client_message5(sid, message):
     # decode bool message
-    commands_["is_follow"] = decode_bool(message)
+    commands_["is_follow"] = True
+    print(f"Received follow command from client {sid}")
+    print(commands_["is_follow"])
+    
+@socket.on('stop_execution')  # Listening for 'client_message' event
+def handle_client_message5(sid, message):
+    # decode bool message
+    commands_["is_follow"] = False
     print(f"Received follow command from client {sid}")
     print(commands_["is_follow"])
 
